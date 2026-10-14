@@ -1,0 +1,57 @@
+[package]
+name = "mtvanitykey"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/h3lix1/MTVanityKey"
+description = "Meshtastic node-ID vanity key generator (CPU, Apple Metal, NVIDIA CUDA) with an HTTP job-queue API"
+readme = "README.md"
+keywords = ["meshtastic", "vanity", "x25519", "gpu", "crc32"]
+categories = ["command-line-utilities", "cryptography"]
+exclude = ["/target"]
+
+[lib]
+name = "mtvanitykey"
+path = "src/lib.rs"
+
+[[bin]]
+name = "mtvanitykey"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+crossbeam-channel = "0.5"
+ctrlc = "3"
+curve25519-dalek = { version = "4", features = ["precomputed-tables"] }
+hex = "0.4"
+num_cpus = "1"
+rand = "0.8"
+rand_chacha = "0.3"
+rand_core = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tiny_http = "0.12"
+libloading = { version = "0.8", optional = true }
+
+[features]
+default = []
+cuda = ["dep:libloading"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = "0.33"
+
+[build-dependencies]
+num-bigint = "0.4"
+num-traits = "0.2"
+
+[dev-dependencies]
+num-bigint = "0.4"
+num-traits = "0.2"
+rayon = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
