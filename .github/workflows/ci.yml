@@ -23,3 +23,33 @@ jobs:
         run: cargo build --release --locked
       - name: Test (CPU; GPU tests skip without a device)
         run: cargo test --release --locked
+
+  macos:
+    name: build (macOS, Metal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      # Hosted runners have no usable GPU, so this compiles everything
+      # (including the Metal host code) without running the GPU tests.
+      - name: Build
+        run: cargo build --release --locked
+      - name: Build tests
+        run: cargo test --release --locked --no-run
+
+  cuda:
+    name: build (CUDA)
+    runs-on: ubuntu-latest
+    container: nvidia/cuda:12.8.1-devel-ubuntu24.04
+    env:
+      CUDA_ARCH: sm_120
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install build tools
+        run: apt-get update -qq && apt-get install -y -qq curl build-essential >/dev/null
+      - uses: dtolnay/rust-toolchain@stable
+      # nvcc compiles the kernels at build time; no GPU is needed for that.
+      - name: Build with CUDA
+        run: cargo build --release --locked --features cuda
+      - name: Build tests with CUDA
+        run: cargo test --release --locked --features cuda --no-run

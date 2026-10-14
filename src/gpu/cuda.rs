@@ -431,7 +431,7 @@ fn load_cuda_library() -> Result<Library> {
 
     let mut attempts = Vec::new();
     for name in NAMES {
-        match unsafe { Library::new(name) } {
+        match unsafe { Library::new(*name) } {
             Ok(library) => return Ok(library),
             Err(error) => attempts.push(format!("{name}: {error}")),
         }
