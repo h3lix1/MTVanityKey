@@ -366,7 +366,7 @@ mod tests {
         assert_eq!(err("meshcore", "beef", 2), "the meshcore flow returns exactly one key (hits must be 1)");
         assert_eq!(err("meshtastic", "dc80", 0), "hits must be at least 1");
         assert_eq!(err("meshtastic", "12g4", 1), "\"g\" is not a hex digit. Use 0-9, a-f, or * for any digit");
-        assert_eq!(err("meshcore", "a1b2c3d4e", 1), "prefix must be 1 to 8 hex characters (got 9)");
+        assert_eq!(err("meshcore", &"a".repeat(65), 1), "prefix must be 1 to 64 hex characters (got 65)");
         assert!(err("reticulum", "1", 1).starts_with("unknown flow"));
         assert!(Stepper::parse("meshtastic", "dc80", [0u8; 32]).is_err());
     }

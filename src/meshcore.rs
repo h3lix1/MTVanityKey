@@ -245,7 +245,7 @@ mod tests {
         let prefix = Prefix::parse(&hex::encode_upper(&key[..4])[..7]).unwrap();
         assert_eq!(scan_until_hit(bases, &prefix, 4 * WINDOW as u64), Some((iter, 0)));
 
-        // The longest accepted prefix (8 characters, 4 bytes) and a near miss
+        // An 8-character prefix (4 bytes) and a near miss
         // in its last nibble.
         let iter = usable_iter(bases[0], 77);
         let key = dalek_key(bases[0], iter);

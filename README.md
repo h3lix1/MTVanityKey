@@ -11,7 +11,8 @@ Two independent flows share one search engine:
   grinding keys. Every fixed hex digit multiplies the work by 16; a full
   8-digit ID (2^32 keys) takes well under a second on a modern NVIDIA GPU.
 * **MeshCore**: an Ed25519 identity key whose public key, in hex, starts with
-  a prefix of your choice (up to 8 characters).
+  a prefix of your choice (any length; each character multiplies the work
+  by 16).
 
 Every hit is re-derived independently on the host with
 [curve25519-dalek](https://github.com/dalek-cryptography/curve25519-dalek)
@@ -226,12 +227,28 @@ hit 1: node id !dc805a49
 
 ### MeshCore prefixes
 
-A MeshCore prefix is 1 to 8 hex characters of the 32-byte Ed25519 public
+A MeshCore prefix is 1 to 64 hex characters of the 32-byte Ed25519 public
 key, case-insensitive. MeshCore reserves public keys starting with byte
 `0x00` or `0xFF`, so prefixes starting `00` or `ff` are rejected and such
-keys are never returned. The limit of 8 characters (2^32 keys expected)
-keeps a single search within seconds on a GPU and minutes on a CPU; it is a
-deliberate cap of this tool, not of MeshCore.
+keys are never returned.
+
+The command line accepts any length and shows the expected time as it runs;
+every character multiplies the work by 16:
+
+| Prefix | Keys expected | RTX 5090 | Apple M1 Max (GPU + CPU) |
+| --- | --- | --- | --- |
+| 8 characters | 2^32 (4.3 G) | ~0.5 s | ~9 s |
+| 9 characters | 2^36 (69 G) | ~6 s | ~2.5 min |
+| 10 characters | 2^40 (1.1 T) | ~1.5 min | ~40 min |
+| 11 characters | 2^44 (18 T) | ~25 min | ~10 h |
+| 12 characters | 2^48 (281 T) | ~6.5 h | ~7 days |
+
+(RTX 5090 at its measured ~12 G keys/s steady state; a 10-character search
+there took 3 min 5 s in one test, an unlucky draw at twice the average.)
+
+These are averages; a single search can take several times as long (see the
+p50/p95 in the progress line). The API server limits what others may ask
+for with `--max-prefix-chars` and `--max-expected-seconds` (see below).
 
 ```bash
 mtvanitykey meshcore f8a1
@@ -330,7 +347,7 @@ Options (defaults in parentheses): `--bind` (127.0.0.1:8080), `--token`
 (32), `--max-hits` per job (16), `--max-expected-seconds` (300): a job whose
 expected duration at the measured rate exceeds this is refused with 413,
 `--max-expected-attempts` (explicit key cap), `--max-digits` for patterns (8),
-`--max-prefix-chars` for MeshCore (8), `--job-timeout` seconds (600): a
+`--max-prefix-chars` for MeshCore (64, i.e. only the time limit applies), `--job-timeout` seconds (600): a
 running job is stopped and fails, `--result-ttl` seconds (600): unretrieved
 results are deleted, `--max-wait` seconds (60) for `wait=` requests,
 `--calibrate` seconds (2) of rate measurement at startup, `--handler-threads`
@@ -407,8 +424,8 @@ curl -s -H "$H" -X DELETE "$B/v1/jobs/9a8e52afbb1d7ead"
 # Refusals.
 curl -s "$B/v1/meshtastic?pattern=12g4"
 # {"error":"\"g\" is not a hex digit. Use 0-9, a-f, or * for any digit"}   (400)
-curl -s "$B/v1/meshcore?prefix=deadbeef0"
-# {"error":"prefix must be 1 to 8 hex characters (got 9)"}                  (400)
+curl -s "$B/v1/meshcore?prefix=0123456789abcdef"
+# {"error":"expected 1.845e19 keys is about 36000000000 s at 5.120e8 keys/s; this server accepts jobs up to 300 s"}   (413)
 ```
 
 Remember to URL-encode `!` (`%21`), `,` (`%2C`) and `*` (`%2A`) in query
@@ -457,8 +474,21 @@ Execution timeout: a few minutes is plenty (the handler stops a job after
 {"flow": "meshcore", "prefix": "BEEF", "client_pubkey": "<base64url P-256 point>"}
 ```
 
-`hits` is 1 to 4 (Meshtastic only). Patterns are limited to 8 fixed hex
-digits and 64 targets, prefixes to 8 characters, as on the API server.
+`hits` is 1 to 4 (Meshtastic only). By default patterns are limited to 8
+fixed hex digits and 64 targets, prefixes to 9 characters, and jobs to 600 s
+of expected search. The limits are set per endpoint with environment
+variables (RunPod: Manage → Edit Endpoint → Environment Variables), no image
+rebuild needed:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MTVK_MAX_PREFIX_CHARS` | 9 | Longest MeshCore prefix (1 to 64) |
+| `MTVK_MAX_DIGITS` | 8 | Most fixed hex digits in a Meshtastic pattern |
+| `MTVK_MAX_HITS` | 4 | Most keys per Meshtastic job |
+| `MTVK_MAX_EXPECTED_SECONDS` | 600 | Refuse jobs expected to take longer on this GPU |
+| `MTVK_JOB_TIMEOUT` | 300 | Stop a running job after this many seconds |
+
+Keep the endpoint's execution timeout above `MTVK_JOB_TIMEOUT`.
 `client_pubkey` is required: an uncompressed P-256 point (65 bytes,
 unpadded base64url), fresh for every job. Invalid input fails the job with
 the API server's message as `error`.
@@ -601,7 +631,7 @@ What the tests cover:
   Setting `MESHTASTIC_ORACLE_JS` to a local copy of the site's `oracle.js`
   (with `node` installed) additionally checks 64 fresh random vectors.
 * **Pattern and prefix parsers**: every accepted and rejected form,
-  wildcards, lists, reserved IDs and prefixes, the 8-character cap.
+  wildcards, lists, reserved IDs and prefixes, the length limits.
 * **Field arithmetic**: the CPU 4x64-bit field against `num-bigint` on edge
   values and random expression chains, the AArch64 assembly bit-exact with
   the portable code; the Metal shader's `fe_mul`/`fe_sq`/`fe_invert` against
@@ -652,7 +682,7 @@ multiplications per candidate.
 
 * MeshCore compares the canonical `y` encoding's low bytes with the prefix
   (the Ed25519 public key is `y` with the sign of `x` in the top bit; that
-  bit is beyond any 8-character prefix).
+  bit only matters for a full 64-character prefix, which the host checks).
 * Meshtastic needs the X25519 public key, the Montgomery `u = (1+y)/(1-y)`.
   Writing `y = n/d` gives `u = (d+n)/(d-n)`, so the batch inversion simply
   runs over `d-n` instead of `d`: the conversion costs nothing. The 32-byte

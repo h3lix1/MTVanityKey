@@ -54,7 +54,8 @@ pub struct ServerConfig {
     pub max_expected_attempts: Option<f64>,
     /// Longest Meshtastic pattern (fixed hex digits) accepted.
     pub max_digits: u32,
-    /// Longest MeshCore prefix accepted (at most [`MAX_PREFIX_CHARS`]).
+    /// Longest MeshCore prefix accepted (default [`MAX_PREFIX_CHARS`], i.e. no
+    /// cap beyond `max_expected_seconds`).
     pub max_prefix_chars: usize,
     /// A running job is stopped (and fails) after this long.
     pub job_timeout: Duration,
