@@ -490,6 +490,7 @@ rebuild needed:
 | `MTVK_MAX_EXPECTED_SECONDS` | 600 | Refuse jobs expected to take longer on this GPU |
 | `MTVK_JOB_TIMEOUT` | 300 | Stop a running job after this many seconds |
 | `MTVK_ASSUMED_RATE` | 5e9 | Keys/s the time limit assumes until the first job measures the GPU |
+| `MTVK_REFRESH_WORKER` | 1 | End the worker after every job (no idle billing; each job cold-starts). 0 keeps it for the endpoint's idle timeout |
 
 Keep the endpoint's execution timeout above `MTVK_JOB_TIMEOUT`.
 `client_pubkey` is required: an uncompressed P-256 point (65 bytes,

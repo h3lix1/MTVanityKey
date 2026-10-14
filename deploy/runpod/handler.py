@@ -75,6 +75,13 @@ LIMITS = {
     "--job-timeout": os.environ.get("MTVK_JOB_TIMEOUT", "300"),
     "--assumed-rate": os.environ.get("MTVK_ASSUMED_RATE", "5e9"),
 }
+# MTVK_REFRESH_WORKER (1): end the worker after every job instead of waiting
+# for the endpoint's idle timeout, so nothing is billed between jobs. A
+# cancelled job (another copy of a fanned-out search found the key first)
+# skips the SDK's own refresh, so the process exits by itself shortly after.
+REFRESH_WORKER = os.environ.get("MTVK_REFRESH_WORKER", "1") == "1"
+CANCELLED_EXIT_SECONDS = 3.0
+
 # One job at a time per worker.
 SERVE_ARGS = [
     "--gpu-only", "--quiet", "--calibrate", "0",
@@ -292,6 +299,20 @@ async def handler(job):
                 http("DELETE", f"/v1/jobs/{local_id}", timeout=2.0)
             except OSError:
                 pass
+            if REFRESH_WORKER:
+                exit_soon()
+
+
+def exit_soon():
+    """End the worker a moment after a cancelled job (time for the SDK to
+    report it): the SDK's refresh_worker does not apply to cancelled jobs."""
+    def stop():
+        time.sleep(CANCELLED_EXIT_SECONDS)
+        log("worker exiting after a cancelled job")
+        stop_serve()
+        os._exit(0)
+
+    threading.Thread(target=stop, daemon=True).start()
 
 
 def import_runpod():
@@ -303,4 +324,4 @@ def import_runpod():
 
 if __name__ == "__main__":
     start_serve(while_starting=import_runpod)
-    runpod.serverless.start({"handler": handler})
+    runpod.serverless.start({"handler": handler, "refresh_worker": REFRESH_WORKER})
