@@ -7,20 +7,34 @@
 //! curve25519-dalek on the host (twice for Meshtastic: once in the worker,
 //! once here) and matched against the request, so nothing unverified can
 //! ever be returned.
+//!
+//! [`Request`] and [`Hit`] are portable (the `stepper` shares them); the
+//! threaded engine below them needs the `cli` feature.
 
+#[cfg(feature = "cli")]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "cli")]
 use std::sync::Arc;
+#[cfg(feature = "cli")]
 use std::thread::JoinHandle;
+#[cfg(feature = "cli")]
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "cli")]
 use anyhow::{anyhow, Context, Result};
+#[cfg(feature = "cli")]
 use crossbeam_channel::{bounded, Receiver, RecvTimeoutError};
+#[cfg(feature = "cli")]
 use serde::Serialize;
 
+#[cfg(feature = "cli")]
 use crate::gpu::{self, Backend};
 use crate::keygen::FoundKey;
-use crate::meshtastic::{self, MeshKey, NodeIdPattern};
+#[cfg(feature = "cli")]
+use crate::meshtastic;
+use crate::meshtastic::{MeshKey, NodeIdPattern};
 use crate::prefix::Prefix;
+#[cfg(feature = "cli")]
 use crate::Counters;
 
 /// What to search for.
@@ -136,7 +150,28 @@ impl Hit {
     }
 }
 
+/// Re-derive `hit` from its private key with curve25519-dalek and check it
+/// against `request`: `Some` only for a key that really matches. Both the
+/// threaded engine and the `stepper` pass every hit through here last.
+pub fn verify(request: &Request, hit: Hit) -> Option<Hit> {
+    match (request, hit) {
+        (Request::Meshtastic { pattern, .. }, Hit::Meshtastic(key)) => {
+            crate::meshtastic::verify_hit(pattern, key.private_key, key.source).map(Hit::Meshtastic)
+        }
+        (Request::Meshcore { prefix }, Hit::Meshcore(key)) => {
+            let mut scalar = [0u8; 32];
+            scalar.copy_from_slice(&key.private_key[..32]);
+            let recomputed = curve25519_dalek::edwards::EdwardsPoint::mul_base_clamped(scalar)
+                .compress()
+                .to_bytes();
+            (recomputed == key.public_key && prefix.matches(&key.public_key)).then_some(Hit::Meshcore(key))
+        }
+        _ => None,
+    }
+}
+
 /// Which workers a search runs.
+#[cfg(feature = "cli")]
 #[derive(Debug, Clone, Serialize)]
 pub struct Workers {
     /// CPU worker threads (0 = none).
@@ -145,6 +180,7 @@ pub struct Workers {
     pub gpu: Option<GpuWorker>,
 }
 
+#[cfg(feature = "cli")]
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct GpuWorker {
     pub backend: Backend,
@@ -153,6 +189,7 @@ pub struct GpuWorker {
 }
 
 /// How the caller asked for the workers (CLI flags / server options).
+#[cfg(feature = "cli")]
 #[derive(Debug, Clone, Default)]
 pub struct WorkerOptions {
     pub cpu_only: bool,
@@ -163,6 +200,7 @@ pub struct WorkerOptions {
     pub gpu_iters: Option<u32>,
 }
 
+#[cfg(feature = "cli")]
 impl Workers {
     /// Resolve the options against this build and machine. A requested
     /// backend that is not built in is an error; with no request the
@@ -227,6 +265,7 @@ impl Workers {
 }
 
 /// Why a search ended.
+#[cfg(feature = "cli")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StopReason {
@@ -243,6 +282,7 @@ pub enum StopReason {
 }
 
 /// The result of one search.
+#[cfg(feature = "cli")]
 #[derive(Debug)]
 pub struct Outcome {
     pub hits: Vec<Hit>,
@@ -253,6 +293,7 @@ pub struct Outcome {
     pub reason: StopReason,
 }
 
+#[cfg(feature = "cli")]
 impl Outcome {
     pub fn rate(&self) -> f64 {
         self.attempts as f64 / self.elapsed.as_secs_f64().max(0.001)
@@ -261,6 +302,7 @@ impl Outcome {
 
 /// A running search: the workers' shared stop flag and counters, and the
 /// channel the verified hits arrive on.
+#[cfg(feature = "cli")]
 pub struct Search {
     request: Request,
     stop: Arc<AtomicBool>,
@@ -270,6 +312,7 @@ pub struct Search {
     handles: Vec<JoinHandle<()>>,
 }
 
+#[cfg(feature = "cli")]
 impl Search {
     /// Spawn the workers for `request`. `stop` may be shared with a signal
     /// handler or a job queue; raising it ends the search.
@@ -369,20 +412,7 @@ impl Search {
     /// Re-verify a hit against the request (the workers already did; this
     /// is the last line of defence before anything leaves the engine).
     fn verify(&self, hit: Hit) -> Option<Hit> {
-        match (&self.request, hit) {
-            (Request::Meshtastic { pattern, .. }, Hit::Meshtastic(key)) => {
-                meshtastic::verify_hit(pattern, key.private_key, key.source).map(Hit::Meshtastic)
-            }
-            (Request::Meshcore { prefix }, Hit::Meshcore(key)) => {
-                let mut scalar = [0u8; 32];
-                scalar.copy_from_slice(&key.private_key[..32]);
-                let recomputed = curve25519_dalek::edwards::EdwardsPoint::mul_base_clamped(scalar)
-                    .compress()
-                    .to_bytes();
-                (recomputed == key.public_key && prefix.matches(&key.public_key)).then_some(Hit::Meshcore(key))
-            }
-            _ => None,
-        }
+        verify(&self.request, hit)
     }
 
     /// Collect hits until the request is satisfied, `stop` is raised, the
@@ -469,6 +499,7 @@ impl Search {
 /// Measure the sustained key rate of `workers` by running a search that
 /// cannot succeed (a full 8-digit node id, 2^32 keys expected, is stopped
 /// after `duration`). Used by the server to size its limits and ETAs.
+#[cfg(feature = "cli")]
 pub fn measure_rate(workers: &Workers, duration: Duration) -> Result<f64> {
     let pattern = NodeIdPattern::parse("!0a1b2c3d")?;
     let request = Request::Meshtastic { pattern, hits: 1 };
@@ -480,7 +511,7 @@ pub fn measure_rate(workers: &Workers, duration: Duration) -> Result<f64> {
     Ok(outcome.rate())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "cli"))]
 mod tests {
     use super::*;
 

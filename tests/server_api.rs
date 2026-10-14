@@ -1,6 +1,7 @@
 //! End-to-end tests of the HTTP API: a server on an ephemeral port with
 //! CPU workers, driven over plain TCP (no HTTP client dependency). Every
 //! returned key is re-derived independently with curve25519-dalek.
+#![cfg(feature = "cli")]
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -221,7 +222,8 @@ fn queue_is_fifo_and_reports_positions_eta_cancel_and_fullness() {
     // examined (it is cancelled below).
     let (status, slow) = get(addr, ENDLESS);
     assert_eq!(status, 202, "{slow}");
-    assert_eq!(slow["status"], "queued");
+    // The worker may pick it up before the response is built.
+    assert!(matches!(slow["status"].as_str().unwrap(), "queued" | "running"), "{slow}");
     assert_eq!(slow["position"], 1);
     assert!(slow["eta_seconds"].as_f64().unwrap() > 0.0);
     let slow_id = slow["id"].as_str().unwrap().to_string();

@@ -45,21 +45,43 @@ impl Candidate {
 /// process (a repeat has probability 2^-256 from a working CSPRNG, so one
 /// is a broken RNG, not bad luck). Either case aborts the search rather than
 /// burning GPU time on keys already searched.
+#[cfg(feature = "cli")]
 pub fn fresh_rng() -> rand_chacha::ChaCha20Rng {
     use rand_core::SeedableRng;
     let mut seed = [0u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut seed);
-    assert!(seed != [0u8; 32], "OS CSPRNG returned an all-zero seed");
-    let mut issued = ISSUED_SEEDS.lock().unwrap_or_else(|e| e.into_inner());
-    assert!(
-        issued.insert(seed),
-        "OS CSPRNG repeated a worker seed within this process"
-    );
+    if let Err(error) = register_seed(&seed) {
+        panic!("OS CSPRNG returned {error}");
+    }
     rand_chacha::ChaCha20Rng::from_seed(seed)
 }
 
-/// Seeds handed out by `fresh_rng` in this process (a few per worker; the
-/// set never grows beyond a handful of entries in a search).
+/// The same stream for a seed the caller drew from its own CSPRNG (the
+/// portable `stepper`, e.g. `crypto.getRandomValues` in a browser), with
+/// the same guard as [`fresh_rng`]: an all-zero seed or one already used in
+/// this process is refused with an error instead of searching again.
+pub fn rng_from_seed(seed: [u8; 32]) -> anyhow::Result<rand_chacha::ChaCha20Rng> {
+    use rand_core::SeedableRng;
+    register_seed(&seed).map_err(|error| anyhow::anyhow!("refusing {error}: the seed must be 32 fresh random bytes"))?;
+    Ok(rand_chacha::ChaCha20Rng::from_seed(seed))
+}
+
+/// Record a worker seed; `Err` names the defect (all-zero, or a repeat of a
+/// seed already issued in this process).
+fn register_seed(seed: &[u8; 32]) -> Result<(), &'static str> {
+    if *seed == [0u8; 32] {
+        return Err("an all-zero seed");
+    }
+    let mut issued = ISSUED_SEEDS.lock().unwrap_or_else(|e| e.into_inner());
+    if !issued.insert(*seed) {
+        return Err("a worker seed repeated within this process");
+    }
+    Ok(())
+}
+
+/// Seeds handed out by `fresh_rng` and `rng_from_seed` in this process (a
+/// few per worker; the set never grows beyond a handful of entries in a
+/// search).
 static ISSUED_SEEDS: std::sync::Mutex<std::collections::BTreeSet<[u8; 32]>> =
     std::sync::Mutex::new(std::collections::BTreeSet::new());
 

@@ -1,0 +1,9 @@
+# Build context = repository root; only the sources the image needs.
+*
+!Cargo.toml
+!Cargo.lock
+!build.rs
+!src/
+!tests/
+!deploy/runpod/requirements.txt
+!deploy/runpod/*.py

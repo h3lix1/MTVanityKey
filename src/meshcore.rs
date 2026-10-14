@@ -9,35 +9,47 @@
 //! candidate; the GPU kernels (`search_kernel`) do the same walk. Every
 //! candidate is re-derived with curve25519-dalek (`candidate_from_scalar`)
 //! and checked with [`Prefix::matches`] before it is reported.
+//!
+//! The thread workers need the `cli` feature; `stepper` runs the same walk
+//! (`scan_window`) on the caller's thread.
 
+#[cfg(feature = "cli")]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "cli")]
 use std::sync::Arc;
+#[cfg(feature = "cli")]
 use std::thread::{self, JoinHandle};
 
+#[cfg(feature = "cli")]
 use crossbeam_channel::Sender;
+#[cfg(feature = "cli")]
 use rand_chacha::ChaCha20Rng;
 
 use crate::ed_walk::Walk;
+#[cfg(feature = "cli")]
 use crate::keygen::{candidate_from_scalar, derive_candidate, random_seed, FoundKey};
 use crate::prefix::Prefix;
+#[cfg(feature = "cli")]
 use crate::Counters;
 
+#[cfg(feature = "cli")]
 const REPORT_EVERY: u64 = 4096;
 
 /// Independent walks per thread (each lane is itself `ed_walk::WINDOW`
 /// interleaved chains; two lanes keep the restart cadence and the
 /// per-window batch of the original design).
-const LANES: usize = 2;
+pub(crate) const LANES: usize = 2;
 
 /// Restart the walk from fresh random bases after this many candidates per
 /// lane: keeps every found key close to an independently random scalar and
 /// `8 * iter` far inside the clamp headroom `random_base_scalar` guarantees.
-const WALK_RESTART_ITERS: u64 = 1 << 24;
+pub(crate) const WALK_RESTART_ITERS: u64 = 1 << 24;
 
 /// Re-check the walk against dalek every this many windows (one exact
 /// derivation per lane per ~512k candidates).
-const RESYNC_WINDOWS: u64 = 1024;
+pub(crate) const RESYNC_WINDOWS: u64 = 1024;
 
+#[cfg(feature = "cli")]
 pub fn spawn_workers(
     threads: usize,
     prefix: Arc<Prefix>,
@@ -73,6 +85,7 @@ pub fn spawn_workers(
 /// against dalek at every (re)start and every `RESYNC_WINDOWS` windows; on a
 /// mismatch (never expected) the thread drops to the original per-candidate
 /// derivation.
+#[cfg(feature = "cli")]
 fn run_worker(
     prefix: Arc<Prefix>,
     stop: Arc<AtomicBool>,
@@ -92,6 +105,7 @@ fn run_worker(
 /// otherwise (or after a detected desynchronisation) the original
 /// per-candidate derivation. Split from `run_worker` so tests can drive the
 /// fallback path directly.
+#[cfg(feature = "cli")]
 fn search(
     mut walk: Option<Walk<LANES>>,
     mut rng: ChaCha20Rng,
@@ -159,7 +173,7 @@ fn search(
 /// key does not depend on the batch-inversion traversal order).
 /// `Prefix::matches_y` ignores the sign bit of x, which the walk does not
 /// compute: exact for prefixes up to 62 nibbles, a superset for 63/64.
-fn scan_window(walk: &mut Walk<LANES>, prefix: &Prefix, hits: &mut Vec<(u64, usize)>) {
+pub(crate) fn scan_window(walk: &mut Walk<LANES>, prefix: &Prefix, hits: &mut Vec<(u64, usize)>) {
     hits.clear();
     walk.next_window(|lane, iter, y| {
         if prefix.matches_y(y) {
@@ -172,11 +186,17 @@ fn scan_window(walk: &mut Walk<LANES>, prefix: &Prefix, hits: &mut Vec<(u64, usi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand_chacha::ChaCha20Rng;
     use rand_core::SeedableRng;
     use crate::ed_walk::WINDOW;
-    use crate::keygen::{random_base_scalar, scalar_add_u64};
+    use crate::keygen::{candidate_from_scalar, random_base_scalar, scalar_add_u64};
+    #[cfg(feature = "cli")]
+    use crate::keygen::FoundKey;
+    #[cfg(feature = "cli")]
     use crossbeam_channel::bounded;
+    #[cfg(feature = "cli")]
     use curve25519_dalek::edwards::EdwardsPoint;
+    #[cfg(feature = "cli")]
     use std::time::Duration;
 
     /// Public key of walk candidate `iter` from `base`, computed with dalek.
@@ -253,6 +273,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "cli")]
     fn find(prefix_text: &str, threads: usize) -> FoundKey {
         let prefix = Arc::new(Prefix::parse(prefix_text).unwrap());
         let stop = Arc::new(AtomicBool::new(false));
@@ -279,6 +300,7 @@ mod tests {
 
     /// Drive `search` directly with a given walk state and check the found
     /// key is a real, dalek-verified key for `prefix_text`.
+    #[cfg(feature = "cli")]
     fn search_finds(walk: Option<Walk<LANES>>, seed: u8, prefix_text: &str) -> FoundKey {
         let prefix = Arc::new(Prefix::parse(prefix_text).unwrap());
         let stop = Arc::new(AtomicBool::new(false));
@@ -310,6 +332,7 @@ mod tests {
 
     /// The fallback (per-candidate derivation) path, taken when the walk
     /// cannot start, still finds valid keys.
+    #[cfg(feature = "cli")]
     #[test]
     fn search_fallback_path_finds_valid_key() {
         search_finds(None, 3, "A1");
@@ -317,6 +340,7 @@ mod tests {
 
     /// A walk whose lane goes wrong is caught by the periodic dalek check
     /// and the worker continues on the fallback path and still finds a key.
+    #[cfg(feature = "cli")]
     #[test]
     fn search_recovers_from_a_desynchronised_walk() {
         let mut rng = ChaCha20Rng::from_seed([4u8; 32]);
@@ -331,6 +355,7 @@ mod tests {
         assert!(hex::encode_upper(found.public_key).starts_with("A1B2"));
     }
 
+    #[cfg(feature = "cli")]
     #[test]
     fn cpu_worker_finds_key_that_rederives_with_dalek() {
         for (text, threads) in [("A1B", 1usize), ("7", 2), ("C4D5", 2)] {

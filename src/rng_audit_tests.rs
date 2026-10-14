@@ -11,12 +11,16 @@
 //! duplicates a word or a reused seed fails deterministically.
 //!
 //! Each statistic is checked on a fixed-seed stream (deterministic) and on
-//! a stream seeded through the production path (`fresh_rng`, OS CSPRNG).
+//! a stream seeded through the production path (`fresh_rng`, OS CSPRNG),
+//! and the caller-seeded path of the portable stepper (`rng_from_seed`) is
+//! checked to expand a seed exactly like `fresh_rng` does.
 
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
 
-use crate::keygen::{fill_base_scalars, fresh_rng};
+use crate::keygen::{fill_base_scalars, rng_from_seed};
+#[cfg(feature = "cli")]
+use crate::keygen::fresh_rng;
 
 const SAMPLES: usize = 1 << 16;
 
@@ -138,6 +142,7 @@ fn ed25519_base_scalars_are_uniform_fixed_seed() {
     audit_ed25519(&scalars, "ed25519 fixed seed");
 }
 
+#[cfg(feature = "cli")]
 #[test]
 fn ed25519_base_scalars_are_uniform_production_seed() {
     let mut rng = fresh_rng();
@@ -147,6 +152,7 @@ fn ed25519_base_scalars_are_uniform_production_seed() {
 
 /// Two workers seeded through the production path get disjoint streams
 /// (and `fresh_rng` refuses to hand out the same seed twice).
+#[cfg(feature = "cli")]
 #[test]
 fn fresh_rngs_are_independent() {
     let mut a = fresh_rng();
@@ -164,6 +170,23 @@ fn fresh_rngs_are_independent() {
     let interleaved: Vec<[u8; 32]> = sa.iter().zip(&sb).flat_map(|(x, y)| [*x, *y]).collect();
     let diff = consecutive_difference_fraction(&interleaved, &mask);
     assert!((diff - 0.5).abs() < fair_bit_tolerance(8191 * 251), "cross-stream difference {diff:.5}");
+}
+
+/// The stepper's caller-seeded stream is plain ChaCha20 keyed with the
+/// seed (the same expansion as `fresh_rng`, so the audit above applies to
+/// it), and the guard refuses an all-zero seed and a repeated one.
+#[test]
+fn caller_seeds_expand_like_fresh_rng_and_are_guarded() {
+    let seed = *b"rng audit: caller seed, 32 bytes";
+    let mut a = rng_from_seed(seed).expect("fresh seed");
+    let mut b = ChaCha20Rng::from_seed(seed);
+    assert_eq!(ed25519_scalars(&mut a, 64), ed25519_scalars(&mut b, 64));
+    let mut a = rng_from_seed(*b"rng audit: second seed, 32 bytes").expect("fresh seed");
+    audit_ed25519(&ed25519_scalars(&mut a, SAMPLES), "ed25519 rng_from_seed");
+    let repeat = rng_from_seed(seed).unwrap_err().to_string();
+    assert!(repeat.contains("repeated"), "{repeat}");
+    let zero = rng_from_seed([0u8; 32]).unwrap_err().to_string();
+    assert!(zero.contains("all-zero"), "{zero}");
 }
 
 /// Which Ed25519 targets the search can reach. A candidate `a` finds target

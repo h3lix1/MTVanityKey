@@ -112,6 +112,56 @@ fn fold512(t: &[u64; 8]) -> Fe {
     Fe([r0 + (c as u64) * 38, r1, r2, r3])
 }
 
+/// The eight little-endian 32-bit limbs of a field element's words.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[inline(always)]
+fn limbs32(a: &Fe) -> [u32; 8] {
+    let w = &a.0;
+    [
+        w[0] as u32, (w[0] >> 32) as u32, w[1] as u32, (w[1] >> 32) as u32,
+        w[2] as u32, (w[2] >> 32) as u32, w[3] as u32, (w[3] >> 32) as u32,
+    ]
+}
+
+/// Sixteen 32-bit limbs of the 512-bit sum of the column sums `col` (each
+/// below 2^37; the value is a product of two numbers below 2^256, so
+/// nothing carries out of limb 15 and `col[16]` is zero).
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[inline(always)]
+fn carry_columns(col: &[u64; 17]) -> [u32; 16] {
+    let mut r = [0u32; 16];
+    let mut carry = 0u64;
+    for k in 0..16 {
+        let v = col[k] + carry;
+        r[k] = v as u32;
+        carry = v >> 32;
+    }
+    r
+}
+
+/// `fold512` on sixteen 32-bit limbs: `low + 38 * high`, then the carry
+/// out of 2^256 (at most 38) folded as `c * 38`, and a second wrap (value
+/// then below 1444) as one more +38 that cannot carry. Output < 2^256.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+#[inline(always)]
+fn fold512_32(t: &[u32; 16]) -> Fe {
+    let mut r = [0u32; 8];
+    let mut carry = 0u64;
+    for k in 0..8 {
+        let v = t[k] as u64 + 38 * t[k + 8] as u64 + carry;
+        r[k] = v as u32;
+        carry = v >> 32;
+    }
+    let mut c = carry * 38;
+    for limb in r.iter_mut() {
+        let v = *limb as u64 + c;
+        *limb = v as u32;
+        c = v >> 32;
+    }
+    let w = |i: usize| r[i] as u64 | (r[i + 1] as u64) << 32;
+    Fe([w(0) + c * 38, w(2), w(4), w(6)])
+}
+
 impl Fe {
     /// Decode 32 little-endian bytes (any value in [0, 2^256) accepted).
     #[cfg(test)]
@@ -296,14 +346,19 @@ impl Fe {
     }
 
     /// `a * b` (mod p), result < 2^256: the hand-scheduled aarch64 schoolbook
-    /// where available, otherwise the portable one.
+    /// where available, the 32-bit-limb one on wasm32, otherwise the
+    /// portable one.
     #[inline(always)]
     pub fn mul(&self, b: &Fe) -> Fe {
         #[cfg(target_arch = "aarch64")]
         {
             self.mul_aarch64(b)
         }
-        #[cfg(not(target_arch = "aarch64"))]
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.mul_32(b)
+        }
+        #[cfg(not(any(target_arch = "aarch64", target_arch = "wasm32")))]
         {
             self.mul_portable(b)
         }
@@ -316,10 +371,60 @@ impl Fe {
         {
             self.sq_aarch64()
         }
-        #[cfg(not(target_arch = "aarch64"))]
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.sq_32()
+        }
+        #[cfg(not(any(target_arch = "aarch64", target_arch = "wasm32")))]
         {
             self.sq_portable()
         }
+    }
+
+    /// `mul_portable` from 32x32->64-bit products, for targets without a
+    /// 64x64->128-bit multiply: on wasm32 every `u128` product of the
+    /// portable code is a call to compiler-rt's `__multi3`, while this is
+    /// 64 inline `i64.mul`s. Product scanning over eight 32-bit limbs: the
+    /// low and high halves of the products are summed per column (at most
+    /// 8 * 2^32 each, so no carry until the end and no serial dependency
+    /// between the multiplies), then one carry pass and the same
+    /// `2^256 = 38` fold as `fold512`, so the result is bit-exact with
+    /// `mul_portable` (differentially tested).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    #[inline(always)]
+    pub fn mul_32(&self, b: &Fe) -> Fe {
+        let a = limbs32(self);
+        let b = limbs32(b);
+        let mut col = [0u64; 17];
+        for i in 0..8 {
+            for j in 0..8 {
+                let p = a[i] as u64 * b[j] as u64;
+                col[i + j] += p & 0xFFFF_FFFF;
+                col[i + j + 1] += p >> 32;
+            }
+        }
+        fold512_32(&carry_columns(&col))
+    }
+
+    /// `sq_portable` from 32x32->64-bit products (see `mul_32`): the 28
+    /// off-diagonal products counted twice plus the 8 squares (36
+    /// multiplies). Bit-exact with `sq_portable`.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    #[inline(always)]
+    pub fn sq_32(&self) -> Fe {
+        let a = limbs32(self);
+        let mut col = [0u64; 17];
+        for i in 0..8 {
+            let p = a[i] as u64 * a[i] as u64;
+            col[2 * i] += p & 0xFFFF_FFFF;
+            col[2 * i + 1] += p >> 32;
+            for j in i + 1..8 {
+                let p = a[i] as u64 * a[j] as u64;
+                col[i + j] += (p & 0xFFFF_FFFF) << 1;
+                col[i + j + 1] += (p >> 32) << 1;
+            }
+        }
+        fold512_32(&carry_columns(&col))
     }
 
     /// Schoolbook product (16 wide multiplies) folded by `fold512`.
@@ -1371,6 +1476,42 @@ mod tests {
             // Chains: every output representation is fed back in.
             x = x.mul_aarch64(&a).sq_aarch64().add_aarch64(&b).sub_aarch64(&a);
             y = y.mul_portable(&a).sq_portable().add_portable(&b).sub_portable(&a);
+            assert_eq!(x.0, y.0, "chain {i}");
+        }
+    }
+
+    /// The 32-bit-limb `mul_32`/`sq_32` (wasm32's field ops) are bit-exact
+    /// with the portable ones on the edge values, carry-stressing words and
+    /// random chains whose outputs are fed back in. Runs on every target.
+    #[test]
+    fn limb32_field_ops_are_bit_exact_with_portable() {
+        let vals: Vec<Fe> = edge_values().iter().map(fe_big).collect();
+        for a in &vals {
+            assert_eq!(a.sq_32().0, a.sq_portable().0, "sq {a:?}");
+            for b in &vals {
+                assert_eq!(a.mul_32(b).0, a.mul_portable(b).0, "mul {a:?} {b:?}");
+            }
+        }
+        let mut rng = ChaCha20Rng::from_seed([32u8; 32]);
+        let word = |rng: &mut ChaCha20Rng| -> u64 {
+            match rng.next_u32() % 8 {
+                0 => u64::MAX,
+                1 => 0,
+                2 => u64::MAX - (rng.next_u64() % 4),
+                3 => rng.next_u64() % 4,
+                4 => 1u64 << 63,
+                5 => 0xFFFF_FFFF,
+                _ => rng.next_u64(),
+            }
+        };
+        let (mut x, mut y) = (vals[vals.len() - 1], vals[vals.len() - 1]);
+        for i in 0..500_000 {
+            let a = Fe([word(&mut rng), word(&mut rng), word(&mut rng), word(&mut rng)]);
+            let b = Fe([word(&mut rng), word(&mut rng), word(&mut rng), word(&mut rng)]);
+            assert_eq!(a.mul_32(&b).0, a.mul_portable(&b).0, "mul {i}");
+            assert_eq!(a.sq_32().0, a.sq_portable().0, "sq {i}");
+            x = x.mul_32(&a).sq_32().add_portable(&b);
+            y = y.mul_portable(&a).sq_portable().add_portable(&b);
             assert_eq!(x.0, y.0, "chain {i}");
         }
     }

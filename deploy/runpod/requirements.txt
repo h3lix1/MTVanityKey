@@ -1,0 +1,2 @@
+runpod==1.12.0
+cryptography==50.0.2
