@@ -43,11 +43,11 @@ cuda = ["dep:libloading"]
 metal = "0.33"
 
 [build-dependencies]
-num-bigint = "0.4"
+num-bigint = "0.5"
 num-traits = "0.2"
 
 [dev-dependencies]
-num-bigint = "0.4"
+num-bigint = "0.5"
 num-traits = "0.2"
 rayon = "1"
 
