@@ -4,6 +4,24 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      # rand, rand_core and rand_chacha share traits and must move together;
+      # rand_core must also match the version curve25519-dalek builds on.
+      rand:
+        patterns: ["rand", "rand_core", "rand_chacha"]
+    ignore:
+      # Major versions of these change APIs (and the rand family must follow
+      # curve25519-dalek); upgrade them by hand.
+      - dependency-name: "rand"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "rand_core"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "rand_chacha"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "sha2"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "num-bigint"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
