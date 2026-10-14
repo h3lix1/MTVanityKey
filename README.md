@@ -37,6 +37,7 @@ for the idea.
 - [Command-line usage](#command-line-usage)
 - [Applying a key to a radio](#applying-a-key-to-a-radio)
 - [API server](#api-server)
+- [RunPod Serverless](#runpod-serverless)
 - [Performance](#performance)
 - [Security](#security)
 - [Testing](#testing)
@@ -131,6 +132,38 @@ when `--gpu-only` is requested. Optional build knobs: `MTVK_CUDA_LB_THREADS`
 (block size, default 256), `MTVK_CUDA_BATCH_INV_WINDOW` (candidates per
 batched inversion, default 256), `MTVK_CUDA_DEFINES` (extra `nvcc`
 arguments).
+
+### Library only, and WebAssembly
+
+The command line, the threaded engine, the API server and the GPU backends
+sit behind the `cli` cargo feature, which is on by default. Without it the
+crate is the portable core: pattern and prefix parsing, hit verification and
+`mtvanitykey::stepper`, a single-threaded search that the caller drives in
+slices and seeds with 32 bytes from its own CSPRNG. That core builds for
+`wasm32-unknown-unknown`:
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo build --lib --release --no-default-features --target wasm32-unknown-unknown
+```
+
+```toml
+mtvanitykey = { git = "https://github.com/h3lix1/MTVanityKey", default-features = false }
+```
+
+```rust
+use mtvanitykey::stepper::Stepper;
+let mut search = Stepper::parse("meshtastic", "!c0de", seed)?; // seed: [u8; 32] from a CSPRNG
+let slice = search.run_windows(1000);           // or run_while(|attempts| ...), run_for(Duration)
+println!("{}", slice.to_json());                // {"attempts": N, "hits": [...]}
+```
+
+The stepper runs the CPU workers' walks and returns hit objects of the same
+shape as the API (`"source": "wasm"` in a wasm build, `"cpu"` otherwise),
+each re-derived with curve25519-dalek. One thread of a browser does about
+2.3 million keys per second (Apple M1 Max, node 23); on wasm32 the field
+multiplication uses 32-bit limb products, since 64x64-bit multiplies there
+are library calls.
 
 ## Command-line usage
 
@@ -381,6 +414,99 @@ curl -s "$B/v1/meshcore?prefix=deadbeef0"
 Remember to URL-encode `!` (`%21`), `,` (`%2C`) and `*` (`%2A`) in query
 strings when your client does not do it for you.
 
+## RunPod Serverless
+
+`deploy/runpod/` runs the CUDA build as a
+[RunPod Serverless](https://docs.runpod.io/serverless/overview) worker: a
+queue-based endpoint that scales GPU workers from zero, so an idle endpoint
+costs nothing. Each worker starts `mtvanitykey serve` on `127.0.0.1` (GPU
+only, quiet) and `handler.py` forwards jobs to it. Results are encrypted to
+a public key the client sends with the job, so plaintext private keys never
+reach RunPod's job store. The GPU operator can still in principle see the
+keys while they are generated; the warning under [Security](#security)
+applies.
+
+**Image.** `deploy/runpod/Dockerfile` builds three binaries (`sm_86`,
+`sm_89`, `sm_120`; each also embeds PTX for newer GPUs) in
+`nvidia/cuda:12.8.1-devel-ubuntu24.04` and copies them into an
+`ubuntu:24.04` runtime with Python, `runpod` and `cryptography`. No CUDA
+runtime is needed in the image: the NVIDIA container toolkit provides the
+host driver's `libcuda` and `nvidia-smi`. The handler picks the highest build
+at or below the GPU's compute capability. The workflow
+`.github/workflows/runpod-image.yml` publishes it as
+`ghcr.io/<owner>/mtvanitykey-runpod` (`latest` from `main`, plus a
+`sha-<commit>` tag on every build). To build it yourself:
+
+```bash
+docker build -f deploy/runpod/Dockerfile -t mtvanitykey-runpod .
+```
+
+**Endpoint.** In the RunPod console create a Serverless endpoint from the
+image (make the GHCR package public, or add registry credentials), choose
+the GPU types (for example RTX 5090, then RTX 4090 as a fallback), set
+active workers to 0 and max workers as you like, and leave the container
+start command empty. No environment variables or volumes are needed.
+Execution timeout: a few minutes is plenty (the handler stops a job after
+300 s).
+
+**Job input** (`POST https://api.runpod.ai/v2/<endpoint id>/run` with
+`{"input": ...}` and your RunPod API key):
+
+```json
+{"flow": "meshtastic", "pattern": "!dead*", "hits": 1, "client_pubkey": "<base64url P-256 point>"}
+{"flow": "meshcore", "prefix": "BEEF", "client_pubkey": "<base64url P-256 point>"}
+```
+
+`hits` is 1 to 4 (Meshtastic only). Patterns are limited to 8 fixed hex
+digits and 64 targets, prefixes to 8 characters, as on the API server.
+`client_pubkey` is required: an uncompressed P-256 point (65 bytes,
+unpadded base64url), fresh for every job. Invalid input fails the job with
+the API server's message as `error`.
+
+**Progress.** While the job is `IN_PROGRESS`, `/status/<job id>` shows
+`{"phase": "starting"|"running", "gpu": "...", "attempts": N,
+"keys_per_second": R, "expected_attempts": E}` as its output, updated about
+every 250 ms. Cancelling the RunPod job (`/cancel/<job id>`) stops the search.
+
+**Output.**
+
+```json
+{"v": 1, "gpu": "NVIDIA GeForce RTX 5090", "attempts": 123, "elapsed_seconds": 0.5, "keys_per_second": 9.3e9,
+ "enc": {"alg": "ECDH-P256+HKDF-SHA256+AES-256-GCM", "epk": "...", "iv": "...", "ct": "..."}}
+```
+
+To decrypt: ECDH between the client's private key and `epk` (65-byte raw
+point), then `key = HKDF-SHA256(ikm = shared secret, salt = epk ||
+client_pubkey, info = "meshkeys.io/v1 result", 32 bytes)`, then AES-256-GCM
+with `iv` (12 bytes), additional data `"meshkeys.io/v1"`, and the 16-byte tag
+at the end of `ct`. The plaintext is `{"hits": [...]}` with the API's hit
+objects. `deploy/runpod/ecies.py` implements both sides; in a browser the
+client is a few WebCrypto calls with a non-extractable key.
+
+**Logging.** The handler logs one line per job (outcome, duration and GPU)
+and never keys, patterns or results; the RunPod SDK's own logging is set to
+warnings (`RUNPOD_LOG_LEVEL`).
+
+**Testing without RunPod**, on any machine with an NVIDIA GPU and the
+binaries built (Python 3 with the two packages from `requirements.txt`):
+
+```bash
+cd deploy/runpod
+python3 selftest.py                                   # encryption and input checks, no GPU
+python3 selftest.py input meshtastic '!c0de' > job.json   # fresh client key in client-key.pem
+MTVK_BINARY=../../target/release/mtvanitykey RUNPOD_LOG_LEVEL=INFO \
+  python3 handler.py --test_input "$(cat job.json)" 2>&1 | tee run.log
+python3 selftest.py decrypt client-key.pem < run.log  # decrypts and re-derives every hit
+```
+
+Measured on an RTX 5090: the handler is ready about 1.7 s after its process
+starts (importing the RunPod SDK, overlapped with `mtvanitykey serve`
+start-up and CUDA initialisation, about 0.5 s); RunPod's own container
+start comes on top. A job costs about 0.5 s of fixed overhead (mostly the
+per-job CUDA context and first launch) plus the search: an 8-digit
+Meshtastic pattern took 1.0 s on average (0.6-1.7 s over 20 jobs), an
+8-character MeshCore prefix 0.9 s (0.5-2.3 s), four 8-digit hits 2.8 s.
+
 ## Performance
 
 Rates measured with this crate (release build, default settings, one job),
@@ -436,7 +562,10 @@ takes on the order of an hour there against well under a second on an RTX
   ChaCha20 stream per worker). Choosing a pattern does not weaken a key: the
   pattern only constrains the public key, which is public anyway, and
   recovering the private key from it still means solving the discrete
-  logarithm on the full curve.
+  logarithm on the full curve. The library's `stepper` takes its 32-byte
+  seed from the caller instead (in a browser, `crypto.getRandomValues`) and
+  expands it the same way; an all-zero seed or one already used in the
+  process is refused.
 * Keys are printed to stdout or returned in an HTTP response and otherwise
   live only in memory. Nothing is written to disk; the server logs method,
   path, status code and job statistics, never keys.
@@ -456,6 +585,8 @@ takes on the order of an hour there against well under a second on an RTX
 ```bash
 cargo test --release                       # CPU + Metal (on macOS) tests
 cargo test --release --features cuda       # + CUDA GPU tests (needs an NVIDIA GPU)
+cargo test --release --no-default-features # the portable core alone
+cargo build --lib --no-default-features --target wasm32-unknown-unknown
 ```
 
 What the tests cover:
@@ -491,6 +622,12 @@ What the tests cover:
   `num-bigint`, full `search_kernel` / `mesh_kernel` launches vs dalek),
   including a tiny-window build that stresses the window bookkeeping. Needs a
   C++ compiler (`CXX`); set `MTVK_ALLOW_NO_CXX=1` to skip.
+* **Stepper**: short patterns and prefixes are found single-threaded, every
+  hit re-derives and has the API's JSON shape, the stopping rules and the
+  per-call hit cap hold, a corrupted walk falls back and still verifies,
+  and caller-supplied seeds expand like the workers' (an all-zero or
+  repeated seed is refused). The 32-bit-limb field multiplication used on
+  wasm32 is bit-exact with the portable one.
 * **Statistics**: base scalars are uniform with the documented clamp bits
   (bit 253 free, so every real key is reachable), worker RNG streams are
   independent, node IDs over the walk are uniform.

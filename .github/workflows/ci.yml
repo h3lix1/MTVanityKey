@@ -37,6 +37,33 @@ jobs:
       - name: Build tests
         run: cargo test --release --locked --no-run
 
+  wasm:
+    name: build (wasm32, portable core)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      # The library without the `cli` feature (no threads, sockets, OS RNG
+      # or GPU), as a browser build uses it.
+      - name: Build the library for wasm32
+        run: cargo build --lib --release --locked --no-default-features --target wasm32-unknown-unknown
+      - name: Test the portable core (native, no default features)
+        run: cargo test --release --locked --no-default-features
+
+  runpod:
+    name: RunPod handler self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Result encryption and job-input validation; no GPU needed.
+      - name: Self-test
+        run: |
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install -q -r deploy/runpod/requirements.txt
+          cd deploy/runpod && /tmp/venv/bin/python selftest.py
+
   cuda:
     name: build (CUDA)
     runs-on: ubuntu-latest
