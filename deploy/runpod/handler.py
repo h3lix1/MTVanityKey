@@ -62,7 +62,10 @@ READY_TIMEOUT = 180.0
 # Job limits, configurable per endpoint through environment variables
 # (defaults in parentheses): MTVK_MAX_PREFIX_CHARS (9), MTVK_MAX_DIGITS (8),
 # MTVK_MAX_HITS (4), MTVK_MAX_EXPECTED_SECONDS (600; jobs expected to take
-# longer at the measured rate are refused) and MTVK_JOB_TIMEOUT (300 s).
+# longer at the measured rate are refused), MTVK_JOB_TIMEOUT (300 s) and
+# MTVK_ASSUMED_RATE (5e9 keys/s: the rate the time limit uses until the
+# first job has measured the real one; the server skips calibration to
+# start fast, and a CPU-scale guess would refuse long GPU jobs).
 # Keep the endpoint's own execution timeout above the job timeout.
 LIMITS = {
     "--max-prefix-chars": os.environ.get("MTVK_MAX_PREFIX_CHARS", "9"),
@@ -70,6 +73,7 @@ LIMITS = {
     "--max-hits": os.environ.get("MTVK_MAX_HITS", "4"),
     "--max-expected-seconds": os.environ.get("MTVK_MAX_EXPECTED_SECONDS", "600"),
     "--job-timeout": os.environ.get("MTVK_JOB_TIMEOUT", "300"),
+    "--assumed-rate": os.environ.get("MTVK_ASSUMED_RATE", "5e9"),
 }
 # One job at a time per worker.
 SERVE_ARGS = [

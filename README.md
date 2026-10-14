@@ -350,7 +350,9 @@ expected duration at the measured rate exceeds this is refused with 413,
 `--max-prefix-chars` for MeshCore (64, i.e. only the time limit applies), `--job-timeout` seconds (600): a
 running job is stopped and fails, `--result-ttl` seconds (600): unretrieved
 results are deleted, `--max-wait` seconds (60) for `wait=` requests,
-`--calibrate` seconds (2) of rate measurement at startup, `--handler-threads`
+`--calibrate` seconds (2) of rate measurement at startup, `--assumed-rate`
+keys/s (1e8) used for the time limit until a rate has been measured (set it
+near the device's rate when skipping calibration), `--handler-threads`
 (8), `--quiet`, plus the worker options (`--cpu-only`, `--gpu-only`,
 `--gpu-backend`, `--threads`, `--gpu-batch`, `--gpu-iters`).
 
@@ -487,6 +489,7 @@ rebuild needed:
 | `MTVK_MAX_HITS` | 4 | Most keys per Meshtastic job |
 | `MTVK_MAX_EXPECTED_SECONDS` | 600 | Refuse jobs expected to take longer on this GPU |
 | `MTVK_JOB_TIMEOUT` | 300 | Stop a running job after this many seconds |
+| `MTVK_ASSUMED_RATE` | 5e9 | Keys/s the time limit assumes until the first job measures the GPU |
 
 Keep the endpoint's execution timeout above `MTVK_JOB_TIMEOUT`.
 `client_pubkey` is required: an uncompressed P-256 point (65 bytes,
