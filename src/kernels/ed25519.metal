@@ -631,7 +631,9 @@ inline bool matches_prefix(ulong y_prefix8, constant SearchParams& params) {
     ulong prefix_bytes = static_cast<ulong>(params.prefix_bytes)
         | (static_cast<ulong>(params.prefix_bytes_hi) << 32);
 
-    uint full_bytes = params.prefix_nibbles >> 1;
+    // Only the low 8 bytes (16 hex characters) are compared here; the host
+    // re-checks every candidate against the whole prefix.
+    uint full_bytes = min(params.prefix_nibbles >> 1, 8u);
     for (uint i = 0; i < full_bytes; i++) {
         uint y_byte = static_cast<uint>(y_prefix8 >> (8 * i)) & 0xFF;
         uint prefix_byte = static_cast<uint>(prefix_bytes >> (8 * i)) & 0xFF;
@@ -640,7 +642,7 @@ inline bool matches_prefix(ulong y_prefix8, constant SearchParams& params) {
         }
     }
 
-    if ((params.prefix_nibbles & 1) != 0) {
+    if ((params.prefix_nibbles & 1) != 0 && full_bytes < 8) {
         uint i = full_bytes;
         uint y_byte = static_cast<uint>(y_prefix8 >> (8 * i)) & 0xFF;
         uint prefix_byte = static_cast<uint>(prefix_bytes >> (8 * i)) & 0xFF;

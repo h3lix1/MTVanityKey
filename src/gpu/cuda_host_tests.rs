@@ -290,6 +290,14 @@ fn write_scenarios(out: &mut String, rng: &mut ChaCha20Rng, extra_random: usize,
         write_search_scenario(out, &bases, iters, &prefix);
         nib = nib % 8 + 1;
     }
+    // Prefixes past the kernel's 8-byte compare: it matches the first 16
+    // characters and the host checks the rest, so the planted key is still
+    // the one (and only one) reported.
+    for (nib, iter) in [(9usize, 3u32), (16, 256), (17, 100), (20, 299), (64, 7)] {
+        let bases = bases_for(rng, 3, &[iter]);
+        let prefix = prefix_of(&pubkey_at(&bases[1], iter), nib);
+        write_search_scenario(out, &bases, 300, &prefix);
+    }
     for n in 0..extra_random {
         let iters = 257 + (rng.next_u32() % 300);
         let t = (rng.next_u32() % 3) as usize;

@@ -22,7 +22,7 @@ turned down to warnings unless RUNPOD_LOG_LEVEL says otherwise.
 
 Environment: MTVK_BIN_DIR (directory of mtvanitykey-sm_*; default
 /opt/mtvanitykey/bin), MTVK_BINARY (use this binary instead), MTVK_PORT
-(default 8080).
+(default 8080), and the job limits below (MTVK_MAX_*, MTVK_JOB_TIMEOUT).
 """
 
 import time
@@ -59,13 +59,23 @@ BASE = f"http://127.0.0.1:{PORT}"
 POLL_SECONDS = 0.05
 PROGRESS_SECONDS = 0.25
 READY_TIMEOUT = 180.0
-# Local server limits: the DESIGN limits (8 digits, 8 prefix characters,
-# 1-4 hits); one job at a time per worker.
+# Job limits, configurable per endpoint through environment variables
+# (defaults in parentheses): MTVK_MAX_PREFIX_CHARS (9), MTVK_MAX_DIGITS (8),
+# MTVK_MAX_HITS (4), MTVK_MAX_EXPECTED_SECONDS (600; jobs expected to take
+# longer at the measured rate are refused) and MTVK_JOB_TIMEOUT (300 s).
+# Keep the endpoint's own execution timeout above the job timeout.
+LIMITS = {
+    "--max-prefix-chars": os.environ.get("MTVK_MAX_PREFIX_CHARS", "9"),
+    "--max-digits": os.environ.get("MTVK_MAX_DIGITS", "8"),
+    "--max-hits": os.environ.get("MTVK_MAX_HITS", "4"),
+    "--max-expected-seconds": os.environ.get("MTVK_MAX_EXPECTED_SECONDS", "600"),
+    "--job-timeout": os.environ.get("MTVK_JOB_TIMEOUT", "300"),
+}
+# One job at a time per worker.
 SERVE_ARGS = [
     "--gpu-only", "--quiet", "--calibrate", "0",
-    "--max-hits", "4", "--max-digits", "8", "--max-prefix-chars", "8",
-    "--max-queue", "4", "--max-expected-seconds", "600",
-    "--job-timeout", "300", "--result-ttl", "60", "--max-wait", "0",
+    *(arg for pair in LIMITS.items() for arg in pair),
+    "--max-queue", "4", "--result-ttl", "60", "--max-wait", "0",
     "--handler-threads", "4",
 ]
 

@@ -122,7 +122,7 @@ struct MeshtasticArgs {
 
 #[derive(ClapArgs, Debug)]
 struct MeshcoreArgs {
-    /// Public-key hex prefix, 1 to 8 characters (case-insensitive; prefixes
+    /// Public-key hex prefix, 1 to 64 characters (case-insensitive; prefixes
     /// starting 00 or FF are reserved by MeshCore). Every character
     /// multiplies the expected search by 16.
     prefix: String,
@@ -165,8 +165,9 @@ struct ServeArgs {
     #[arg(long, default_value_t = 8, value_name = "N")]
     max_digits: u32,
 
-    /// Longest MeshCore prefix accepted, in hex characters (at most 8).
-    #[arg(long, default_value_t = 8, value_name = "N")]
+    /// Longest MeshCore prefix accepted, in hex characters (1 to 64; the
+    /// default 64 leaves only the --max-expected-seconds limit).
+    #[arg(long, default_value_t = mtvanitykey::prefix::MAX_PREFIX_CHARS, value_name = "N")]
     max_prefix_chars: usize,
 
     /// Stop (and fail) a running job after this many seconds.
@@ -359,9 +360,9 @@ fn run_search(request: Request, search: &SearchOptions, run: &RunOptions) -> Res
 }
 
 fn serve(args: ServeArgs) -> Result<()> {
-    if args.max_prefix_chars > mtvanitykey::prefix::MAX_PREFIX_CHARS {
+    if !(1..=mtvanitykey::prefix::MAX_PREFIX_CHARS).contains(&args.max_prefix_chars) {
         return Err(anyhow!(
-            "--max-prefix-chars may be at most {}",
+            "--max-prefix-chars must be 1 to {}",
             mtvanitykey::prefix::MAX_PREFIX_CHARS
         ));
     }

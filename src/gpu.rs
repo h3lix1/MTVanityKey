@@ -73,8 +73,8 @@ pub(super) struct SearchParams {
     pub prefix_bytes: u32,
     /// Candidates checked per thread; candidate k is `base_scalar + 8*k`.
     pub iters: u32,
-    /// Prefix bytes 4..8 (always zero at this crate's 8-character cap; the
-    /// kernels' fast path compares up to 16 hex characters).
+    /// Prefix bytes 4..8. The kernels compare at most these 8 bytes (16 hex
+    /// characters); longer prefixes are finished on the host.
     pub prefix_bytes_hi: u32,
     pub _pad: u32,
     /// All prefix bytes packed little-endian, byte i in word i/4.
@@ -948,6 +948,16 @@ mod metal_loop_tests {
 
     #[test]
     fn metal_search_loop_rederives_key_from_pipelined_launch() {
+        metal_planted_key_is_found(8);
+    }
+
+    /// Longer than the kernel's 16-character compare: the host finishes it.
+    #[test]
+    fn metal_search_loop_finds_prefix_longer_than_kernel_compare() {
+        metal_planted_key_is_found(20);
+    }
+
+    fn metal_planted_key_is_found(nibbles: usize) {
         let seed = [0x5Au8; 32];
         let batch = 16usize;
         let iters = 300u32; // crosses one 256-wide inversion window
@@ -955,7 +965,7 @@ mod metal_loop_tests {
         let base = base_at(seed, batch, launch, index);
         let scalar = scalar_add_u64(base, 8 * iter as u64);
         let pubkey = candidate_from_scalar(scalar, [0u8; 32]).public_key;
-        let Ok(prefix) = Prefix::parse(&hex::encode_upper(&pubkey[..4])) else {
+        let Ok(prefix) = Prefix::parse(&hex::encode_upper(pubkey)[..nibbles]) else {
             // A reserved first byte (00/FF): the planted key is not a MeshCore key.
             return;
         };
@@ -983,7 +993,7 @@ mod metal_loop_tests {
         assert!(stop.load(Ordering::Relaxed));
         assert_eq!(found.source, "metal");
         assert!(prefix.matches(&found.public_key));
-        // A 4-byte prefix matches 2^-32 of random keys: the planted key is
+        // A 4-byte (or longer) prefix matches at most 2^-32 of random keys: the planted key is
         // the one found unless an astronomically unlikely chance match came
         // first in an earlier launch.
         assert_eq!(found.public_key, pubkey);

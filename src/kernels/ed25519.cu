@@ -669,7 +669,7 @@ __device__ __forceinline__ EPoint edwards_mul_base(
 }
 
 // Prefix compare on the canonical low 8 bytes of y (prefixes up to 16
-// nibbles; the host caps them at 8). The byte/nibble loop of
+// nibbles; the host re-checks longer ones against the whole prefix). The byte/nibble loop of
 // Prefix::matches is folded into one 64-bit mask computed once per thread:
 // full prefix bytes are 0xFF, an odd trailing nibble masks the HIGH half
 // (0xF0) of the next byte (the prefix's first hex digit is the high nibble

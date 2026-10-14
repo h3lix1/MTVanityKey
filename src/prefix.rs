@@ -1,9 +1,11 @@
 use anyhow::{anyhow, Result};
 
-/// Longest accepted prefix: 8 hex characters (4 bytes, 2^32 expected keys).
-/// Every character multiplies the expected search by 16; the cap keeps a
-/// single job within seconds on a GPU and minutes on a CPU.
-pub const MAX_PREFIX_CHARS: usize = 8;
+/// Longest prefix the parser accepts: the whole 32-byte public key. This is
+/// not a policy limit: every character multiplies the expected search by 16
+/// (on an RTX 5090: 9 characters about 6 s, 10 about 1.5 minutes, 12 about
+/// 6.5 hours, on average), so callers that serve others cap it themselves
+/// (`ServerConfig::max_prefix_chars`, the time limit, or their own rules).
+pub const MAX_PREFIX_CHARS: usize = 64;
 
 /// A MeshCore public-key hex prefix (1 to [`MAX_PREFIX_CHARS`] characters,
 /// case-insensitive). MeshCore reserves keys whose first byte is 0x00 or
@@ -75,7 +77,8 @@ impl Prefix {
 
     /// The prefix bytes packed little-endian. The GPU compares this against
     /// the low 8 bytes of the canonical public key (its fast path handles up
-    /// to 16 hex characters; this crate caps prefixes at 8).
+    /// to 16 hex characters; the host re-checks every candidate against the
+    /// whole prefix, so longer prefixes are filtered there).
     pub fn packed_u64(&self) -> u64 {
         let mut packed = 0u64;
         for (i, byte) in self.bytes.iter().copied().enumerate().take(8) {
@@ -185,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn caps_prefix_length_at_eight() {
+    fn accepts_prefixes_up_to_the_whole_key() {
         let prefix = Prefix::parse("a1b2c3d4").unwrap();
         assert_eq!(prefix.nibbles(), 8);
         assert_eq!(prefix.bytes(), &[0xA1, 0xB2, 0xC3, 0xD4]);
@@ -194,8 +197,19 @@ mod tests {
         assert_eq!(words[0], 0xD4C3_B2A1);
         assert_eq!(words[1..], [0u32; 7]);
         assert_eq!(prefix.expected_attempts(), 4294967296.0);
-        let err = Prefix::parse("a1b2c3d4e").unwrap_err().to_string();
-        assert!(err.contains("1 to 8 hex characters"), "{err}");
+        let prefix = Prefix::parse("a1b2c3d4e").unwrap();
+        assert_eq!(prefix.nibbles(), 9);
+        assert_eq!(prefix.bytes(), &[0xA1, 0xB2, 0xC3, 0xD4, 0xE0]);
+        assert_eq!(prefix.packed_u64(), 0xE0_D4C3_B2A1);
+        assert_eq!(prefix.packed_words()[..2], [0xD4C3_B2A1, 0xE0]);
+        assert_eq!(prefix.expected_attempts(), 68719476736.0);
+        let whole = "a1".repeat(32);
+        let prefix = Prefix::parse(&whole).unwrap();
+        assert_eq!(prefix.nibbles(), 64);
+        assert_eq!(prefix.bytes(), &[0xA1; 32]);
+        assert_eq!(prefix.packed_words(), [0xA1A1_A1A1; 8]);
+        let err = Prefix::parse(&format!("{whole}0")).unwrap_err().to_string();
+        assert!(err.contains("1 to 64 hex characters"), "{err}");
         assert!(Prefix::parse("").is_err());
         assert!(Prefix::parse("g1").is_err());
         assert!(Prefix::parse(" 1a ").is_ok());

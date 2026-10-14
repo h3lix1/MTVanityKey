@@ -146,9 +146,13 @@ fn health_and_validation() {
     let (status, body) = get(addr, "/v1/meshtastic?pattern=!deadbeef");
     assert_eq!(status, 413);
     assert!(body["error"].as_str().unwrap().contains("this server accepts jobs up to"));
-    let (status, body) = get(addr, "/v1/meshcore?prefix=deadbeef0");
+    // Long prefixes are limited by the expected time unless capped explicitly.
+    let (status, body) = get(addr, "/v1/meshcore?prefix=deadbeef01");
+    assert_eq!(status, 413);
+    assert!(body["error"].as_str().unwrap().contains("this server accepts jobs up to"));
+    let (status, body) = get(addr, &format!("/v1/meshcore?prefix={}", "a".repeat(65)));
     assert_eq!(status, 400);
-    assert!(body["error"].as_str().unwrap().contains("1 to 8 hex characters"));
+    assert!(body["error"].as_str().unwrap().contains("1 to 64 hex characters"));
     let (status, _) = get(addr, "/v1/meshcore?prefix=00ab");
     assert_eq!(status, 400);
     let (status, _) = get(addr, "/v1/meshcore?prefix=ab&hits=2");
