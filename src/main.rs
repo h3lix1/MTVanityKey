@@ -186,6 +186,12 @@ struct ServeArgs {
     #[arg(long, default_value_t = 2.0, value_name = "SECS")]
     calibrate: f64,
 
+    /// Keys/s assumed for the time limit and ETAs until a rate has been
+    /// measured (by --calibrate or a finished job). With --calibrate 0 set
+    /// it near the device's real rate, or long jobs are refused at first.
+    #[arg(long, default_value_t = 1e8, value_name = "KEYS_PER_SEC")]
+    assumed_rate: f64,
+
     /// HTTP handler threads (each waiting request occupies one).
     #[arg(long, default_value_t = 8, value_name = "N")]
     handler_threads: usize,
@@ -385,6 +391,10 @@ fn serve(args: ServeArgs) -> Result<()> {
     config.result_ttl = Duration::from_secs(args.result_ttl.max(1));
     config.max_wait = Duration::from_secs(args.max_wait);
     config.calibrate = Duration::from_secs_f64(args.calibrate.max(0.0));
+    if !(args.assumed_rate.is_finite() && args.assumed_rate > 0.0) {
+        return Err(anyhow!("--assumed-rate must be a positive number of keys per second"));
+    }
+    config.fallback_rate = args.assumed_rate;
     config.handler_threads = args.handler_threads.max(1);
     config.log = !args.quiet;
     let has_token = config.token.is_some();
@@ -450,7 +460,7 @@ mod tests {
     fn serve_subcommand_parses_limits() {
         let cli = Cli::try_parse_from([
             "mtvanitykey", "serve", "--bind", "0.0.0.0:9000", "--token", "secret", "--max-queue", "4",
-            "--max-expected-seconds", "30", "--calibrate", "0",
+            "--max-expected-seconds", "30", "--calibrate", "0", "--assumed-rate", "5e9",
         ])
         .unwrap();
         match cli.command {
@@ -460,6 +470,7 @@ mod tests {
                 assert_eq!(s.max_queue, 4);
                 assert_eq!(s.max_expected_seconds, 30.0);
                 assert_eq!(s.calibrate, 0.0);
+                assert_eq!(s.assumed_rate, 5e9);
             }
             other => panic!("unexpected {other:?}"),
         }
