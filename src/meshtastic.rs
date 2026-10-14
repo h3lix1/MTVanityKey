@@ -17,16 +17,23 @@
 //! `mesh_kernel`s (GPU). Every hit is re-derived here with curve25519-dalek
 //! and a bitwise CRC before it is reported.
 
+#[cfg(feature = "cli")]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "cli")]
 use std::sync::Arc;
+#[cfg(feature = "cli")]
 use std::thread::{self, JoinHandle};
 
 use anyhow::{anyhow, Result};
+#[cfg(feature = "cli")]
 use crossbeam_channel::Sender;
 use curve25519_dalek::montgomery::MontgomeryPoint;
+#[cfg(feature = "cli")]
 use rand_chacha::ChaCha20Rng;
 
+#[cfg(feature = "cli")]
 use crate::mesh_walk::UWalk;
+#[cfg(feature = "cli")]
 use crate::Counters;
 
 /// Node numbers the firmware refuses (`NUM_RESERVED` and `NODENUM_BROADCAST`).
@@ -447,14 +454,17 @@ pub fn verify_hit(pattern: &NodeIdPattern, secret: [u8; 32], source: &'static st
 }
 
 // ---------------------------------------------------------------------------
-// CPU workers.
+// CPU workers (the threaded engine; `stepper` runs the same walk on the
+// caller's thread).
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "cli")]
 const REPORT_EVERY: u64 = 4096;
-const LANES: usize = 2;
-const WALK_RESTART_ITERS: u64 = 1 << 24;
-const RESYNC_WINDOWS: u64 = 1024;
+pub(crate) const LANES: usize = 2;
+pub(crate) const WALK_RESTART_ITERS: u64 = 1 << 24;
+pub(crate) const RESYNC_WINDOWS: u64 = 1024;
 
+#[cfg(feature = "cli")]
 pub fn spawn_cpu_workers(
     threads: usize,
     pattern: Arc<NodeIdPattern>,
@@ -487,6 +497,7 @@ pub fn spawn_cpu_workers(
 /// every restart and every `RESYNC_WINDOWS` windows), otherwise one dalek
 /// derivation per candidate. Runs until `stop`; every hit is re-derived by
 /// `verify_hit` before it is sent.
+#[cfg(feature = "cli")]
 fn search(
     mut walk: Option<UWalk<LANES>>,
     mut rng: ChaCha20Rng,
@@ -598,8 +609,11 @@ pub fn self_test_host() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "cli")]
     use crossbeam_channel::bounded;
+    use rand_chacha::ChaCha20Rng;
     use rand_core::SeedableRng;
+    #[cfg(feature = "cli")]
     use std::time::Duration;
 
     #[test]
@@ -792,6 +806,7 @@ mod tests {
         assert_eq!(base64_encode(&secret), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEA=");
     }
 
+    #[cfg(feature = "cli")]
     fn collect_hits(pattern_text: &str, threads: usize, wanted: usize) -> Vec<MeshKey> {
         let pattern = Arc::new(NodeIdPattern::parse(pattern_text).unwrap());
         let stop = Arc::new(AtomicBool::new(false));
@@ -810,6 +825,7 @@ mod tests {
         hits
     }
 
+    #[cfg(feature = "cli")]
     #[test]
     fn cpu_workers_find_keys_that_rederive() {
         for (text, threads, wanted) in [("a", 1usize, 3usize), ("dc8", 2, 2), ("!1234,5678,abcd", 2, 1), ("*a*b", 1, 1)] {
@@ -826,6 +842,7 @@ mod tests {
     }
 
     /// The fallback path (no walk) finds valid keys too.
+    #[cfg(feature = "cli")]
     #[test]
     fn cpu_fallback_path_finds_valid_key() {
         let pattern = Arc::new(NodeIdPattern::parse("7").unwrap());
@@ -847,6 +864,7 @@ mod tests {
     /// A desynchronised walk is caught (its first bogus hit fails the dalek
     /// re-derivation, or the periodic check fires) and the worker continues
     /// on the fallback path.
+    #[cfg(feature = "cli")]
     #[test]
     fn cpu_worker_recovers_from_desynchronised_walk() {
         let mut rng = ChaCha20Rng::from_seed([4u8; 32]);

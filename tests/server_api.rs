@@ -1,6 +1,7 @@
 //! End-to-end tests of the HTTP API: a server on an ephemeral port with
 //! CPU workers, driven over plain TCP (no HTTP client dependency). Every
 //! returned key is re-derived independently with curve25519-dalek.
+#![cfg(feature = "cli")]
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};

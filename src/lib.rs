@@ -11,8 +11,14 @@
 //!
 //! [`search`] drives either flow to a requested number of hits; [`server`]
 //! exposes both behind an HTTP JSON API with a FIFO job queue.
+//!
+//! The threaded engine, the server and the GPU backends need the `cli`
+//! feature (on by default). Without it the crate is the portable core:
+//! parsing, verification and [`stepper`], a single-threaded search driven
+//! by the caller, which also builds for `wasm32-unknown-unknown`.
 
 pub mod ed_walk;
+#[cfg(feature = "cli")]
 pub mod gpu;
 pub mod keygen;
 pub mod mesh_walk;
@@ -21,7 +27,10 @@ pub mod meshtastic;
 pub mod prefix;
 pub mod progress;
 pub mod search;
+#[cfg(feature = "cli")]
 pub mod server;
+pub mod stepper;
+#[cfg(feature = "cli")]
 pub mod table;
 
 #[cfg(test)]
