@@ -35,6 +35,7 @@ import json  # noqa: E402
 import os  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
+import threading  # noqa: E402
 import urllib.error  # noqa: E402
 import urllib.parse  # noqa: E402
 import urllib.request  # noqa: E402
@@ -179,18 +180,38 @@ def local_path(job_input):
     return f"/v1/{flow}?{urllib.parse.urlencode(query)}", client
 
 
+# The SDK's progress_update posts from a detached thread, so an update can
+# reach RunPod after the job's result and flip it back to IN_PROGRESS for
+# good. Updates are sent from threads kept here instead, and the handler
+# waits for the last one before it returns the result.
+progress_thread = None
+
+
 def send_progress(job, status):
+    global progress_thread
     # Outside a RunPod worker (local test mode) there is nowhere to send it.
     if runpod is None or not os.environ.get("RUNPOD_WEBHOOK_POST_OUTPUT"):
         return
+    if progress_thread is not None and progress_thread.is_alive():
+        return  # the previous update is still in flight; skip this one
     attempts = status.get("attempts") or 0
-    runpod.serverless.progress_update(job, {
+    progress = {
         "phase": "running" if status.get("status") == "running" and attempts > 0 else "starting",
         "gpu": gpu_name,
         "attempts": attempts,
         "keys_per_second": status.get("keys_per_second") or 0.0,
         "expected_attempts": status.get("expected_attempts") or 0.0,
-    })
+    }
+    from runpod.serverless.modules import rp_progress
+
+    progress_thread = threading.Thread(target=rp_progress._thread_target, args=(job, progress), daemon=True)
+    progress_thread.start()
+
+
+def wait_for_progress():
+    """Let an in-flight progress update land before the result is sent."""
+    if progress_thread is not None:
+        progress_thread.join(timeout=10)
 
 
 async def handler(job):
@@ -222,6 +243,7 @@ async def handler(job):
                 return {"error": "the GPU engine is unavailable; retry", "refresh_worker": True}
             if status != 200:
                 finished = True
+                await asyncio.to_thread(wait_for_progress)
                 log("job failed")
                 return {"error": body.get("error", f"HTTP {status}")}
             state = body.get("status")
@@ -232,6 +254,7 @@ async def handler(job):
                 await asyncio.sleep(POLL_SECONDS)
                 continue
             finished = True
+            await asyncio.to_thread(wait_for_progress)
             if state != "done":
                 log(f"job {state}")
                 return {"error": body.get("error", state)}
