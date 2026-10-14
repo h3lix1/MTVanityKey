@@ -26,7 +26,7 @@ ctrlc = "3"
 curve25519-dalek = { version = "4", features = ["precomputed-tables"] }
 hex = "0.4"
 num_cpus = "1"
-rand = "0.8"
+rand = "0.10"
 rand_chacha = "0.3"
 rand_core = "0.6"
 serde = { version = "1", features = ["derive"] }
