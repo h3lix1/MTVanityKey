@@ -76,11 +76,19 @@ LIMITS = {
     "--assumed-rate": os.environ.get("MTVK_ASSUMED_RATE", "5e9"),
 }
 # MTVK_REFRESH_WORKER (1): end the worker after every job instead of waiting
-# for the endpoint's idle timeout, so nothing is billed between jobs. A
-# cancelled job (another copy of a fanned-out search found the key first)
-# skips the SDK's own refresh, so the process exits by itself shortly after.
+# for the endpoint's idle timeout, so nothing is billed between jobs.
 REFRESH_WORKER = os.environ.get("MTVK_REFRESH_WORKER", "1") == "1"
-CANCELLED_EXIT_SECONDS = 3.0
+
+# Fanned-out searches (several jobs for one request, the first key wins):
+# a job may carry a `group_url` under MTVK_GROUP_URL_PREFIX (unset: the
+# feature is off and the field is ignored). While searching, the handler
+# polls it every GROUP_POLL_SECONDS; once it answers {"done": true} the job
+# ends normally without keys ({"superseded": true}). Ending normally, rather
+# than being cancelled by RunPod, lets refresh_worker stop the worker
+# cleanly: a cancelled job's result is rejected and the worker then exits
+# in a way RunPod treats as a failure (restarts and retries, billed).
+GROUP_URL_PREFIX = os.environ.get("MTVK_GROUP_URL_PREFIX", "")
+GROUP_POLL_SECONDS = 2.0
 
 # One job at a time per worker.
 SERVE_ARGS = [
@@ -171,6 +179,26 @@ def start_serve(while_starting=None):
     log(f"ready in {time.monotonic() - T0:.2f} s: {gpu_name} (compute {cap[0]}.{cap[1]}, {os.path.basename(binary)})")
 
 
+def group_url(job_input):
+    """The job's group_url if it is allowed (MTVK_GROUP_URL_PREFIX), else None."""
+    url = job_input.get("group_url") if isinstance(job_input, dict) else None
+    if not GROUP_URL_PREFIX or not isinstance(url, str) or len(url) > 512:
+        return None
+    if not url.startswith(GROUP_URL_PREFIX) or any(c.isspace() for c in url):
+        return None
+    return url
+
+
+def group_done(url):
+    """True if the group says the search is over (failures count as not)."""
+    request = urllib.request.Request(url, headers={"User-Agent": "mtvanitykey-runpod"})
+    try:
+        with urllib.request.urlopen(request, timeout=3.0) as response:
+            return json.loads(response.read(4096)).get("done") is True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def local_path(job_input):
     """Validate the job input; return (local API path, client public key)."""
     if not isinstance(job_input, dict):
@@ -255,6 +283,8 @@ async def handler(job):
     local_id = body["id"]
     finished = False
     next_progress = time.monotonic()
+    group = group_url(job.get("input"))
+    next_group = time.monotonic() + GROUP_POLL_SECONDS
     try:
         while True:
             try:
@@ -268,6 +298,19 @@ async def handler(job):
                 log("job failed")
                 return {"error": body.get("error", f"HTTP {status}")}
             state = body.get("status")
+            if state in ("queued", "running") and group and time.monotonic() >= next_group:
+                next_group = time.monotonic() + GROUP_POLL_SECONDS
+                if await asyncio.to_thread(group_done, group):
+                    # Another job of this search found the key (or it was
+                    # stopped): end normally, without keys.
+                    try:
+                        http("DELETE", f"/v1/jobs/{local_id}", timeout=2.0)
+                    except OSError:
+                        pass
+                    finished = True
+                    await asyncio.to_thread(wait_for_progress)
+                    log(f"job superseded {time.monotonic() - started:.2f} s {gpu_name}")
+                    return {"v": 1, "superseded": True, "gpu": gpu_name, "attempts": body.get("attempts") or 0}
             if state in ("queued", "running"):
                 if time.monotonic() >= next_progress:
                     send_progress(job, body)
@@ -299,20 +342,7 @@ async def handler(job):
                 http("DELETE", f"/v1/jobs/{local_id}", timeout=2.0)
             except OSError:
                 pass
-            if REFRESH_WORKER:
-                exit_soon()
 
-
-def exit_soon():
-    """End the worker a moment after a cancelled job (time for the SDK to
-    report it): the SDK's refresh_worker does not apply to cancelled jobs."""
-    def stop():
-        time.sleep(CANCELLED_EXIT_SECONDS)
-        log("worker exiting after a cancelled job")
-        stop_serve()
-        os._exit(0)
-
-    threading.Thread(target=stop, daemon=True).start()
 
 
 def import_runpod():
