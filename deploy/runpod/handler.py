@@ -75,9 +75,11 @@ LIMITS = {
     "--job-timeout": os.environ.get("MTVK_JOB_TIMEOUT", "300"),
     "--assumed-rate": os.environ.get("MTVK_ASSUMED_RATE", "5e9"),
 }
-# MTVK_REFRESH_WORKER (1): end the worker after every job instead of waiting
-# for the endpoint's idle timeout, so nothing is billed between jobs.
-REFRESH_WORKER = os.environ.get("MTVK_REFRESH_WORKER", "1") == "1"
+# MTVK_REFRESH_WORKER (0): ask RunPod to reset the worker after every job.
+# Off by default: RunPod answers the reset by starting a fresh container on
+# that worker a minute or so later, which idles (and is billed) before it
+# stops. A short endpoint idle timeout stops workers sooner and cheaper.
+REFRESH_WORKER = os.environ.get("MTVK_REFRESH_WORKER", "0") == "1"
 
 # Fanned-out searches (several jobs for one request, the first key wins):
 # a job may carry a `group_url` under MTVK_GROUP_URL_PREFIX (unset: the

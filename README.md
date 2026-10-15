@@ -490,7 +490,7 @@ rebuild needed:
 | `MTVK_MAX_EXPECTED_SECONDS` | 600 | Refuse jobs expected to take longer on this GPU |
 | `MTVK_JOB_TIMEOUT` | 300 | Stop a running job after this many seconds |
 | `MTVK_ASSUMED_RATE` | 5e9 | Keys/s the time limit assumes until the first job measures the GPU |
-| `MTVK_REFRESH_WORKER` | 1 | End the worker after every job (no idle billing; each job cold-starts). 0 keeps it for the endpoint's idle timeout |
+| `MTVK_REFRESH_WORKER` | 0 | 1 asks RunPod to reset the worker after every job. Not recommended: RunPod then starts a fresh container on the worker a minute later, which idles and is billed. Use a short endpoint idle timeout instead (1 s works well) |
 | `MTVK_GROUP_URL_PREFIX` | (unset) | Allow jobs to carry a `group_url` starting with this prefix. For a search sent as several jobs, the handler polls it every 2 s and ends its job normally, without keys (`{"superseded": true}`), once it answers `{"done": true}`. Prefer this to cancelling running jobs: a cancelled job's worker exits in a way RunPod restarts and bills |
 
 Keep the endpoint's execution timeout above `MTVK_JOB_TIMEOUT`.
