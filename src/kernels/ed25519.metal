@@ -1,4 +1,4 @@
-// MTVanityKey Metal kernels: the Ed25519 window walk shared by the MeshCore
+// MeshVanityKey Metal kernels: the Ed25519 window walk shared by the MeshCore
 // prefix search (search_kernel) and the Meshtastic node-ID search
 // (mesh_kernel). Field arithmetic is ref10's radix-2^25.5 representation;
 // the basepoint table (build.rs) and the affine step tables

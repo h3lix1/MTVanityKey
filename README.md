@@ -1,7 +1,10 @@
-# MTVanityKey
+# MeshVanityKey
 
 Vanity key generator for mesh radios, on CPU, Apple Metal and NVIDIA CUDA,
 with a command-line tool and an HTTP JSON API with a job queue.
+
+(Formerly MTVanityKey. The command, the Rust crate, the RunPod image
+`mtvanitykey-runpod` and the `MTVK_*` settings keep their names.)
 
 Two independent flows share one search engine:
 
@@ -78,8 +81,8 @@ build script generates the Ed25519 basepoint table and, with the `cuda`
 feature, compiles the CUDA kernel with `nvcc`.
 
 ```bash
-git clone https://github.com/h3lix1/MTVanityKey.git
-cd MTVanityKey
+git clone https://github.com/h3lix1/MeshVanityKey.git
+cd MeshVanityKey
 ```
 
 ### CPU only (Linux, macOS, Windows)
@@ -149,7 +152,7 @@ cargo build --lib --release --no-default-features --target wasm32-unknown-unknow
 ```
 
 ```toml
-mtvanitykey = { git = "https://github.com/h3lix1/MTVanityKey", default-features = false }
+mtvanitykey = { git = "https://github.com/h3lix1/MeshVanityKey", default-features = false }
 ```
 
 ```rust
@@ -704,5 +707,5 @@ ever miss keys, never report a wrong one.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Copyright (c) 2026 MTVanityKey contributors.
+MIT, see [LICENSE](LICENSE). Copyright (c) 2026 MeshVanityKey contributors.
 No warranty; use at your own risk.

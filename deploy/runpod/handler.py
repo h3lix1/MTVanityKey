@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RunPod Serverless worker for MTVanityKey.
+"""RunPod Serverless worker for MeshVanityKey.
 
 On start: pick the CUDA build that matches GPU 0 (the highest of sm_86,
 sm_89 and sm_120 at or below its compute capability; each binary also

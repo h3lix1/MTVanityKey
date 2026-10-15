@@ -1,4 +1,4 @@
-//! MTVanityKey: vanity key generation for mesh radios.
+//! MeshVanityKey: vanity key generation for mesh radios.
 //!
 //! Two independent search flows share one engine (CPU workers plus an
 //! optional Metal or CUDA GPU worker, every hit re-derived on the host with

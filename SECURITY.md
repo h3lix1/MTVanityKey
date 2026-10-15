@@ -1,6 +1,6 @@
 # Security policy
 
-MTVanityKey generates private keys. If you find a problem that could weaken
+MeshVanityKey generates private keys. If you find a problem that could weaken
 those keys, leak them, or let someone else obtain them (for example in the
 random number generation, the key derivation, or the API server), please
 report it privately instead of opening a public issue:
