@@ -1,4 +1,4 @@
-# RunPod Serverless worker image for MTVanityKey (see deploy/runpod/handler.py).
+# RunPod Serverless worker image for MeshVanityKey (see deploy/runpod/handler.py).
 # Build from the repository root:
 #   docker build -f deploy/runpod/Dockerfile -t mtvanitykey-runpod .
 

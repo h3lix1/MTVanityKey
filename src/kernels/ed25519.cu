@@ -1,4 +1,4 @@
-// MTVanityKey CUDA kernels: the Ed25519 window walk shared by the MeshCore
+// MeshVanityKey CUDA kernels: the Ed25519 window walk shared by the MeshCore
 // prefix search (search_kernel) and the Meshtastic node-ID search
 // (mesh_kernel). Mirrors src/kernels/ed25519.metal; compiled by build.rs
 // with nvcc, or as host C++ through tests/cuda_host/shim.h for the
